@@ -3,11 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 const LANGUAGES = [
   { code: 'en', label: 'English', flag: '🇺🇸' },
-  { code: 'es', label: 'Español', flag: '🇪🇸' },
-  { code: 'fr', label: 'Français', flag: '🇫🇷' },
   { code: 'id', label: 'Indonesia', flag: '🇮🇩' },
-  { code: 'ja', label: '日本語', flag: '🇯🇵' },
-  { code: 'ar', label: 'العربية', flag: '🇸🇦' },
 ];
 
 export default function Navbar({ activeTab, onTabChange }) {
@@ -19,7 +15,6 @@ export default function Navbar({ activeTab, onTabChange }) {
 
   const changeLanguage = (code) => {
     i18n.changeLanguage(code);
-    document.documentElement.dir = code === 'ar' ? 'rtl' : 'ltr';
     setOpen(false);
   };
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Filter as BadWords } from 'bad-words';
 import { Profanity, ProfanityOptions } from '@2toad/profanity';
@@ -11,10 +11,38 @@ const profanityOptions = new ProfanityOptions();
 profanityOptions.wholeWord = true;
 const toadProfanity = new Profanity(profanityOptions);
 
+// English-only obscenity matcher
 const obscenityMatcher = new RegExpMatcher({
   ...englishDataset.build(),
   ...englishRecommendedTransformers,
 });
+
+// ── Indonesian word list (regex-based) ───────────────────────────────────────
+const ID_BAD_WORDS = [
+  'anjing', 'babi', 'bangsat', 'bajingan', 'keparat',
+  'sialan', 'goblok', 'tolol', 'brengsek', 'kampret',
+  'tai', 'tahi', 'asu', 'jancok', 'jancuk',
+  'kontol', 'memek', 'ngentot', 'pepek', 'jembut',
+  'celeng', 'cuk', 'diamput', 'kunyuk', 'monyet',
+];
+
+const ID_REGEX = new RegExp(
+  `\\b(${ID_BAD_WORDS.join('|')})\\b`,
+  'gi'
+);
+
+function censorIndonesian(text) {
+  const matches = [...text.matchAll(ID_REGEX)];
+  if (!matches.length) return { filtered: text, matchCount: 0 };
+  // Replace each match with asterisks preserving length
+  let filtered = text;
+  // Process in reverse order to keep indices stable
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const m = matches[i];
+    filtered = filtered.slice(0, m.index) + '*'.repeat(m[0].length) + filtered.slice(m.index + m[0].length);
+  }
+  return { filtered, matchCount: matches.length };
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function countAsteriskGroups(str) {
@@ -43,19 +71,16 @@ function runToadProfanity(text) {
   }
 }
 
-function runObscenity(text) {
+function censorWithMatcher(matcher, text) {
   try {
-    const matches = obscenityMatcher.getAllMatches(text);
+    const matches = matcher.getAllMatches(text);
     const hasProfanity = matches.length > 0;
     let filtered = text;
-    // Replace matches in reverse order to preserve indices
     if (hasProfanity) {
       const chars = text.split('');
       [...matches].reverse().forEach(match => {
-        const startIndex = match.startIndex;
-        const endIndex = match.endIndex;
-        const len = endIndex - startIndex + 1;
-        chars.splice(startIndex, len, '*'.repeat(len));
+        const len = match.endIndex - match.startIndex + 1;
+        chars.splice(match.startIndex, len, '*'.repeat(len));
       });
       filtered = chars.join('');
     }
@@ -65,7 +90,25 @@ function runObscenity(text) {
   }
 }
 
-// ── Highlight censored asterisk-blocks in filtered text ───────────────────────
+function runObscenityEnId(text) {
+  try {
+    // Layer 1: English obscenity matcher
+    const enResult = censorWithMatcher(obscenityMatcher, text);
+    // Layer 2: Indonesian regex on top of already-censored text
+    const idResult = censorIndonesian(enResult.filtered);
+    const totalCount = enResult.matchCount + idResult.matchCount;
+    return {
+      filtered: idResult.filtered,
+      hasProfanity: totalCount > 0,
+      matchCount: totalCount,
+      error: null,
+    };
+  } catch (e) {
+    return { filtered: text, hasProfanity: false, matchCount: 0, error: e.message };
+  }
+}
+
+// ── Highlight censored asterisk-blocks ────────────────────────────────────────
 function HighlightedText({ text }) {
   const parts = text.split(/(\*+)/g);
   return (
@@ -89,10 +132,13 @@ export default function TextFilterPanel() {
   const wordCount = input.trim() ? input.trim().split(/\s+/).length : 0;
 
   const handleFilter = () => {
-    const bw  = runBadWords(input);
-    const tt  = runToadProfanity(input);
-    const obs = runObscenity(input);
-    setResults({ bw, tt, obs, original: input });
+    setResults({
+      bw:    runBadWords(input),
+      tt:    runToadProfanity(input),
+      obs:   censorWithMatcher(obscenityMatcher, input),
+      obsId: runObscenityEnId(input),
+      original: input,
+    });
   };
 
   const handleClear = () => {
@@ -102,27 +148,10 @@ export default function TextFilterPanel() {
 
   const libraries = results
     ? [
-        {
-          key: 'bw',
-          name: t('textFilter.badWordsLib'),
-          desc: t('textFilter.badWordsDesc'),
-          badge: 'bw',
-          data: results.bw,
-        },
-        {
-          key: 'tt',
-          name: t('textFilter.profanityLib'),
-          desc: t('textFilter.profanityDesc'),
-          badge: 'tt',
-          data: results.tt,
-        },
-        {
-          key: 'obs',
-          name: t('textFilter.obscenityLib'),
-          desc: t('textFilter.obscenityDesc'),
-          badge: 'ob',
-          data: results.obs,
-        },
+        { key: 'bw',    name: t('textFilter.badWordsLib'),    desc: t('textFilter.badWordsDesc'),    badge: 'bw', data: results.bw },
+        { key: 'tt',    name: t('textFilter.profanityLib'),   desc: t('textFilter.profanityDesc'),   badge: 'tt', data: results.tt },
+        { key: 'obs',   name: t('textFilter.obscenityLib'),   desc: t('textFilter.obscenityDesc'),   badge: 'ob', data: results.obs },
+        { key: 'obsId', name: t('textFilter.obscenityIdLib'), desc: t('textFilter.obscenityIdDesc'), badge: 'id', data: results.obsId },
       ]
     : [];
 
@@ -138,12 +167,8 @@ export default function TextFilterPanel() {
 
       {/* Stats row */}
       <div className="stats-row">
-        <div className="stat-chip">
-          📝 {t('textFilter.charCount')}: <strong>{charCount}</strong>
-        </div>
-        <div className="stat-chip">
-          🔤 {t('textFilter.wordCount')}: <strong>{wordCount}</strong>
-        </div>
+        <div className="stat-chip">📝 {t('textFilter.charCount')}: <strong>{charCount}</strong></div>
+        <div className="stat-chip">🔤 {t('textFilter.wordCount')}: <strong>{wordCount}</strong></div>
       </div>
 
       {/* Input */}
@@ -159,19 +184,10 @@ export default function TextFilterPanel() {
       </div>
 
       <div className="btn-group">
-        <button
-          id="filter-btn"
-          className="btn btn-primary"
-          onClick={handleFilter}
-          disabled={!input.trim()}
-        >
+        <button id="filter-btn" className="btn btn-primary" onClick={handleFilter} disabled={!input.trim()}>
           🔍 {t('textFilter.filterBtn')}
         </button>
-        <button
-          id="filter-clear-btn"
-          className="btn btn-secondary"
-          onClick={handleClear}
-        >
+        <button id="filter-clear-btn" className="btn btn-secondary" onClick={handleClear}>
           ✕ {t('textFilter.clearBtn')}
         </button>
       </div>
@@ -180,7 +196,6 @@ export default function TextFilterPanel() {
       {results && (
         <>
           <div className="divider" />
-
           <div style={{ fontWeight: 700, marginBottom: 16, color: 'var(--text-secondary)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             {t('textFilter.resultsTitle')}
           </div>
@@ -199,9 +214,7 @@ export default function TextFilterPanel() {
               <div className="result-card-header">
                 <div>
                   <span className={`lib-badge ${lib.badge}`}>{lib.name}</span>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    {lib.desc}
-                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>{lib.desc}</div>
                 </div>
                 <span className={`detection-count${lib.data.hasProfanity ? ' found' : ''}`}>
                   {lib.data.hasProfanity

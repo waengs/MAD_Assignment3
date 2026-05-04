@@ -66,7 +66,7 @@ export default function App() {
 
         {/* Footer */}
         <footer style={{ textAlign: 'center', marginTop: 48, color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-          <p>Built with React · react-use · i18next · bad-words · @2toad/profanity · obscenity</p>
+          <p>{t('footer')}</p>
         </footer>
       </div>
     </>
