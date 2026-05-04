@@ -9,6 +9,7 @@ const badWordsFilter = new BadWords({ placeHolder: '*' });
 
 const profanityOptions = new ProfanityOptions();
 profanityOptions.wholeWord = true;
+profanityOptions.grawlixChar = '*'; // use * so countAsteriskGroups works correctly
 const toadProfanity = new Profanity(profanityOptions);
 
 // English-only obscenity matcher
@@ -63,7 +64,11 @@ function runBadWords(text) {
 function runToadProfanity(text) {
   try {
     const hasProfanity = toadProfanity.exists(text);
-    const filtered = hasProfanity ? toadProfanity.censor(text) : text;
+    let filtered = hasProfanity ? toadProfanity.censor(text) : text;
+    // Convert grawlix (@#$%&!) to asterisks by comparing against original
+    if (hasProfanity) {
+      filtered = [...filtered].map((ch, i) => ch !== text[i] ? '*' : ch).join('');
+    }
     const matchCount = countAsteriskGroups(filtered);
     return { filtered, hasProfanity, matchCount, error: null };
   } catch (e) {
@@ -73,16 +78,28 @@ function runToadProfanity(text) {
 
 function censorWithMatcher(matcher, text) {
   try {
-    const matches = matcher.getAllMatches(text);
+    const raw = matcher.getAllMatches(text);
+
+    // Deduplicate overlapping matches: sort by startIndex desc, skip overlaps
+    const sorted = [...raw].sort((a, b) => b.startIndex - a.startIndex);
+    const matches = [];
+    let ceiling = Infinity;
+    for (const m of sorted) {
+      if (m.endIndex < ceiling) {
+        matches.push(m);
+        ceiling = m.startIndex;
+      }
+    }
+
     const hasProfanity = matches.length > 0;
     let filtered = text;
-    if (hasProfanity) {
-      const chars = text.split('');
-      [...matches].reverse().forEach(match => {
-        const len = match.endIndex - match.startIndex + 1;
-        chars.splice(match.startIndex, len, '*'.repeat(len));
-      });
-      filtered = chars.join('');
+    // Process high-to-low (already sorted desc) so earlier indices stay valid
+    for (const match of matches) {
+      const len = match.endIndex - match.startIndex + 1;
+      filtered =
+        filtered.slice(0, match.startIndex) +
+        '*'.repeat(len) +
+        filtered.slice(match.endIndex + 1);
     }
     return { filtered, hasProfanity, matchCount: matches.length, error: null };
   } catch (e) {
@@ -224,7 +241,9 @@ export default function TextFilterPanel() {
               </div>
               {lib.data.error
                 ? <span style={{ color: 'var(--accent-danger)', fontSize: '0.85rem' }}>Error: {lib.data.error}</span>
-                : <HighlightedText text={lib.data.filtered} />}
+                : lib.data.hasProfanity
+                  ? <HighlightedText text={lib.data.filtered} />
+                  : <span className="result-text">{lib.data.filtered}</span>}
             </div>
           ))}
         </>
