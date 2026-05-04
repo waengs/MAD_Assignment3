@@ -64,10 +64,12 @@ function runBadWords(text) {
 function runToadProfanity(text) {
   try {
     const hasProfanity = toadProfanity.exists(text);
-    let filtered = hasProfanity ? toadProfanity.censor(text) : text;
-    // Convert grawlix (@#$%&!) to asterisks by comparing against original
+    let filtered = text;
     if (hasProfanity) {
-      filtered = [...filtered].map((ch, i) => ch !== text[i] ? '*' : ch).join('');
+      // Replace each profane word with asterisks (bypass censor's grawlix)
+      filtered = text.replace(/\b\w+\b/g, (word) =>
+        toadProfanity.exists(word) ? '*'.repeat(word.length) : word
+      );
     }
     const matchCount = countAsteriskGroups(filtered);
     return { filtered, hasProfanity, matchCount, error: null };
